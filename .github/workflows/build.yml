@@ -1,0 +1,106 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: sgcc-crypto-api-linux-x64
+          - os: windows-latest
+            artifact: sgcc-crypto-api-win-x64.exe
+          - os: macos-latest
+            artifact: sgcc-crypto-api-darwin-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate crypto_bundle.js
+        run: node extract_bundle.js
+
+      - name: Build bundle
+        run: npx esbuild server.js --bundle --platform=node --outfile=dist/bundle.js
+
+      - name: Create SEA config
+        run: |
+          echo '{"main":"dist/bundle.js","output":"dist/sea-prep.blob","disableExperimentalSEAWarning":true}' > dist/sea-config.json
+
+      - name: Build SEA (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          node --experimental-sea-config dist/sea-config.json
+          cp $(which node) dist/${{ matrix.artifact }}
+          npx postject dist/${{ matrix.artifact }} NODE_SEA_BLOB dist/sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+          chmod +x dist/${{ matrix.artifact }}
+
+      - name: Build SEA (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          node --experimental-sea-config dist/sea-config.json
+          cp (Get-Command node).Source dist/${{ matrix.artifact }}
+          npx postject dist/${{ matrix.artifact }} NODE_SEA_BLOB dist/sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  # ARM64 Linux 使用 QEMU 模拟
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate crypto_bundle.js
+        run: node extract_bundle.js
+
+      - name: Build bundle
+        run: npx esbuild server.js --bundle --platform=node --outfile=dist/bundle.js
+
+      - name: Build ARM64 binary
+        run: |
+          docker run --rm --platform linux/arm64 -v $PWD:/build -w /build node:18 bash -c "
+            npm install -g postject &&
+            echo '{\"main\":\"dist/bundle.js\",\"output\":\"dist/sea-prep.blob\",\"disableExperimentalSEAWarning\":true}' > dist/sea-config.json &&
+            node --experimental-sea-config dist/sea-config.json &&
+            cp \$(which node) dist/sgcc-crypto-api-linux-arm64 &&
+            postject dist/sgcc-crypto-api-linux-arm64 NODE_SEA_BLOB dist/sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 &&
+            chmod +x dist/sgcc-crypto-api-linux-arm64
+          "
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgcc-crypto-api-linux-arm64
+          path: dist/sgcc-crypto-api-linux-arm64

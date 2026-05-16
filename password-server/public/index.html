@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>密码计算器</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 400px;
+      margin: 0 auto;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+      color: #4ecca3;
+    }
+    .card {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      color: #aaa;
+      font-size: 14px;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #0f0f23;
+      color: #fff;
+      font-size: 14px;
+    }
+    input:focus {
+      outline: none;
+      border-color: #4ecca3;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #4ecca3;
+      color: #1a1a2e;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #3db892;
+    }
+    .btn-secondary {
+      background: #333;
+      color: #fff;
+      margin-top: 10px;
+    }
+    .btn-secondary:hover {
+      background: #444;
+    }
+    .result {
+      margin-top: 16px;
+      padding: 16px;
+      background: #0f0f23;
+      border-radius: 6px;
+      text-align: center;
+      display: none;
+    }
+    .result.show {
+      display: block;
+    }
+    .result-value {
+      color: #4ecca3;
+      font-family: monospace;
+      font-size: 24px;
+      letter-spacing: 4px;
+    }
+    #reader {
+      width: 100%;
+      margin-bottom: 10px;
+    }
+    #reader video {
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>密码计算器</h1>
+
+    <div class="card" id="scanner-card">
+      <div id="reader"></div>
+      <button onclick="startScanner()">扫描二维码</button>
+      <button class="btn-secondary" onclick="manualInput()">手动输入</button>
+    </div>
+
+    <div class="card" id="manual-card" style="display: none;">
+      <div class="form-group">
+        <label>随机码</label>
+        <input type="text" id="randomCode" maxlength="16" placeholder="16位随机码" style="text-transform: uppercase;">
+      </div>
+      <button onclick="calc()">计算</button>
+      <button class="btn-secondary" onclick="backToScanner()">返回扫描</button>
+      <div class="result" id="result">
+        <div class="result-value" id="password">--</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script>
+    let html5QrCode = null;
+    let isScanning = false;
+
+    async function startScanner() {
+      if (isScanning) return;
+      
+      try {
+        html5QrCode = new Html5Qrcode('reader');
+        isScanning = true;
+        
+        await html5QrCode.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          onScanSuccess,
+          onScanFailure
+        );
+      } catch (err) {
+        isScanning = false;
+        alert('无法访问摄像头: ' + err.message);
+      }
+    }
+
+    function onScanSuccess(decodedText) {
+      // 停止扫描
+      if (html5QrCode && isScanning) {
+        html5QrCode.stop().then(() => {
+          html5QrCode.clear();
+          isScanning = false;
+        });
+      }
+      
+      // 计算验证码
+      calcWithCode(decodedText.toUpperCase());
+    }
+
+    function onScanFailure(error) {
+      // 忽略扫描失败
+    }
+
+    function manualInput() {
+      stopScanner();
+      document.getElementById('scanner-card').style.display = 'none';
+      document.getElementById('manual-card').style.display = 'block';
+    }
+
+    function backToScanner() {
+      document.getElementById('manual-card').style.display = 'none';
+      document.getElementById('scanner-card').style.display = 'block';
+      document.getElementById('result').classList.remove('show');
+    }
+
+    function stopScanner() {
+      if (html5QrCode && isScanning) {
+        html5QrCode.stop().then(() => {
+          html5QrCode.clear();
+          isScanning = false;
+        }).catch(() => {});
+      }
+    }
+
+    async function calc() {
+      const randomCode = document.getElementById('randomCode').value.trim().toUpperCase();
+      if (!randomCode) {
+        alert('请输入随机码');
+        return;
+      }
+      calcWithCode(randomCode);
+    }
+
+    async function calcWithCode(randomCode) {
+      const res = await fetch('/api/calc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ randomCode })
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        // 显示结果
+        stopScanner();
+        document.getElementById('scanner-card').style.display = 'none';
+        document.getElementById('manual-card').style.display = 'block';
+        document.getElementById('randomCode').value = randomCode;
+        document.getElementById('password').textContent = data.password;
+        document.getElementById('result').classList.add('show');
+      } else {
+        alert(data.error);
+      }
+    }
+  </script>
+</body>
+</html>
